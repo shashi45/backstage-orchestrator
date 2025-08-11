@@ -1,9 +1,85 @@
+# orchestrator_agent/main.py
 import uvicorn
-from a2a.server import A2AStarterApplication
-from orchestrator_agent.agent_card import AGENT_CARD
-from orchestrator_agent.executor import OrchestratorExecutor
+from typing_extensions import override
 
-app = A2AStarterApplication(agent_card=AGENT_CARD, executor=OrchestratorExecutor())
+# A2A SDK imports (package name: a2a-sdk / a2a)
+from a2a.server.apps import A2AStarletteApplication
+from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.tasks import InMemoryTaskStore
+from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.events import EventQueue
+from a2a.utils import new_agent_text_message, get_message_text
+from a2a.types import AgentCard, AgentSkill, AgentCapabilities
+
+# -----------------------
+# Define skills & agent card
+# -----------------------
+orchestrate_skill = AgentSkill(
+    id="orchestrate_template",
+    name="Orchestrate Backstage Template Flow",
+    description="High-level orchestrator entrypoint for template creation flows (planning, discovery).",
+    tags=["orchestrator", "templates", "planning"],
+    examples=["I want to create a lambda template", "Create a new backstage component for service X"],
+)
+
+PUBLIC_AGENT_CARD = AgentCard(
+    name="Backstage Orchestrator Agent",
+    description="High-level orchestrator agent for Backstage template creation (initial POC).",
+    url="http://127.0.0.1:9000/",
+    version="0.1.0",
+    defaultInputModes=["text"],
+    defaultOutputModes=["text"],
+    capabilities=AgentCapabilities(streaming=False),
+    skills=[orchestrate_skill],
+    supportsAuthenticatedExtendedCard=False,
+)
+
+# -----------------------
+# Minimal Orchestrator Executor
+# -----------------------
+class OrchestratorExecutor(AgentExecutor):
+    """A tiny OrchestratorExecutor that reads the incoming text and returns
+    a short acknowledgement.  Later we'll replace the ACK with planner logic
+    that builds LangGraph plans and calls MCP/A2A agents.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        # put orchestration state or clients here later (e.g. client factory)
+
+    @override
+    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        # Extract user's text from the incoming A2A RequestContext
+        user_text = get_message_text(context.message) or "<no text>"
+        # Minimal reply for now
+        reply_text = f"Orchestrator ACK: received your request: {user_text}"
+        # Enqueue a single text-message event back to the caller
+        await event_queue.enqueue_event(new_agent_text_message(reply_text))
+        # when required, we can enqueue more events (status updates, progress, streaming parts)
+
+    @override
+    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
+        # We don't support cancel in this minimal POC
+        raise NotImplementedError("cancel not implemented for orchestrator POC")
+
+
+# -----------------------
+# Wire up request handler, task store, and server
+# -----------------------
+def build_server():
+    request_handler = DefaultRequestHandler(
+        agent_executor=OrchestratorExecutor(),
+        task_store=InMemoryTaskStore(),
+    )
+
+    server = A2AStarletteApplication(
+        agent_card=PUBLIC_AGENT_CARD,
+        http_handler=request_handler,
+        # optionally supply an extended_agent_card here if you want auth-aware behavior
+    )
+    return server.build()
+
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    # run at :9000 (or change as desired)
+    uvicorn.run(build_server(), host="127.0.0.1", port=9000)
