@@ -1,0 +1,9 @@
+import uvicorn
+from a2a.server import A2AStarterApplication
+from template_agent.agent_card import AGENT_CARD
+from template_agent.executor import TemplateAgentExecutor
+
+app = A2AStarterApplication(agent_card=AGENT_CARD, executor=TemplateAgentExecutor())
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8001)
